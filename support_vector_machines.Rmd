@@ -1,0 +1,273 @@
+---
+title: "Support Vector Machines"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Libraries 
+
+We first include the four libraries we will need:
+  * magrittr: a forward-pipe operator, here we will use it to organize our steps in a feed-forward manner
+  * tidyverse: a set of packages for organized data analysis
+  * e1071: a statistical analysis package, which includes functions for support vector machine learning
+  * ggplot2: for some general plotting
+
+```{r}
+library(magrittr)
+library(tidyverse)
+library(e1071)
+library(ggplot2)
+# library(caret) # this package is useful for a few different types of classification algorithms
+```
+
+## Loading data
+
+We will fit a support vector machine model to a well-known publicly available R data set, the iris data, which is built into R, and contains information for 150 different flowers, with four different features and three species: *setosa, virginica, *and *versicolor*. We will focus on two features so we can visualize the data as we go: *Petal.Width* and *Petal.Length*.
+
+First, load the iris data and plot the features we will look at today. 
+
+```{r}
+data(iris)
+ggplot(iris, aes(x = Petal.Width, y = Petal.Length)) + 
+  geom_point(aes(color = Species)) + 
+  ggtitle(paste0("Iris species for ", nrow(iris), " samples, petal length by width"))
+```
+
+## Linearly separable data
+
+We will go through this data set in steps. We start by filtering the data to select two linearly separable classes. We then turn the *Species* variable into a factor column (categorical data with preset values), as one way to be sure we will have a classification support vector machine (instead of a regression model).
+
+These two classes are visibly separable by a straight line: *setosa, versicolor*
+
+```{r}
+classes <- c("setosa", "versicolor")
+lin_sep <- iris %>% 
+  filter(Species %in% classes) %>% 
+  select(Petal.Length, Petal.Width, Species)
+
+lin_sep$Species <- factor(lin_sep$Species, levels = classes)
+```
+
+This subset has `r nrow(lin_sep)` rows, we will set aside roughly 20\% of the data to use for testing the model later, with roughly 80\% being used for training purposes. 
+
+Here we generate a set of binary indices (1 or 2) to indicate whether a sample will be part of the training set or the testing set. 
+
+```{r}
+sample_indices <- sample(2, nrow(lin_sep), replace = TRUE, prob = c(0.8,0.2))
+
+table(sample_indices)
+```
+
+```{r}
+training_linsep <- lin_sep[sample_indices == 1,]
+test_linsep <- lin_sep[sample_indices == 2,]
+
+ggplot(training_linsep, aes(x = Petal.Width, y = Petal.Length)) + 
+  geom_point(aes(color = Species)) + 
+  ggtitle(paste0("Linearly separable iris training data (", 
+                 nrow(training_linsep), " samples), petal length by width"))
+```
+
+This is a visually simple example, and you could use a straightforward regression analysis to generate a separator between the classes. We will use an SVM here anyway, to illustrate how it works. 
+
+Kernel selection is a key point of SVMs, and we can see here that a line would be enough for a good decision boundary, so we can use a linear kernel. Note that he linear kernel is helpful for linearly separable data, the polynomial kernel can be used for non-linear input, and the radial basis function (RBF) kernel maps to a feature space using an exponential function (this is a popular kernel for high-dimensional data).
+
+We'll start with a tune-in parameter cost of 10, and no scaling (so none of the variables are standardized to have a mean of 0 and variance of 1). We'll run a hyper parameter tuning step later to see if this cost value is optimal. 
+
+```{r}
+svm_model <- svm(Species ~ ., data = training_linsep, kernel = "linear", cost = 10, scale = FALSE)
+print(svm_model)
+```
+
+We plot our first attempt at SVM classification using the e1071 plot() function. 
+
+```{r}
+plot(svm_model, training_linsep, dataSymbol = 1, col = c("#8DD3C7","#FFFFB3"))
+```
+
+
+From the summary we can see that we have a linear kernel with 2 support vectors (which means that only one point from each class was used for defining the decision boundary, the points labeled with X's in the above plot). 
+
+```{r}
+summary(svm_model)
+```
+
+
+```{r}
+svm_model <- svm(Species ~ ., data = training_linsep, kernel = "linear", cost = 0.5, scale = FALSE)
+plot(svm_model, training_linsep, dataSymbol = 1, col = c("#8DD3C7","#FFFFB3"))
+```
+
+```{r}
+summary(svm_model)
+```
+
+If we use a smaller cost value, we are allowing for a larger (wider) margin, so we get more support vectors (`r svm_model$tot.nSV`, in this case).
+
+From the e1071 library, we can use the tune() function for 10-fold (default is 10) cross-validation. 
+This is a function for hyper parameter tuning. Since we have a linear kernel, the only *required* arguments include the method type (svm), a formula indicating how you want the data considered (in y ~ x form), the data set you want to run the cross validation on, the type of kernel, and a list of hyper-parameters with values. For linear kernels this only requires a set of cost values to try.
+
+```{r}
+tune_svm = tune(method = svm, Species ~ .,
+                data = training_linsep, 
+                kernel = "linear", 
+                ranges = list(cost = 10^(-1:2)))
+summary(tune_svm$best.model)
+```
+
+Now we can use this "best model" generated using cross validation to predict the test data classes.
+The predict() function comes from the stats library (which you likely already have installed).
+
+```{r}
+test_classes <- predict(tune_svm$best.model, test_linsep)
+table(predicted = test_classes, actual = test_linsep$Species)
+```
+
+So we can see that all the test data values were given the right labels. 
+You can manually experiment with different parameters of the SVM model to see how the predicted classes change or run sets of values for hyper-parameters through the tune() analysis. 
+
+If you want to try different types of kernels, note that there are other parameters that go with these. For example, with kernel = "polynomial" we need to supply a degree value, and if kernel = "radial" (as in the RBF kernel), we supply a $\gamma$ value.
+
+We now go back to our original iris data set, but consider two non-linearly separable classes (using only the petal features).
+
+```{r}
+classes <- c("versicolor", "virginica")
+
+nonlin_sep <- iris %>% 
+  filter(Species %in% classes) %>% 
+  select(Petal.Length, Petal.Width, Species)
+nonlin_sep$Species <- factor(nonlin_sep$Species, levels = classes)
+
+training_nonlin <- nonlin_sep[sample_indices == 1,]
+test_nonlin <- nonlin_sep[sample_indices == 2,]
+
+ggplot(training_nonlin, aes(x = Petal.Width, y = Petal.Length)) + 
+  geom_point(aes(color = Species)) + 
+  ggtitle(paste0("Non-linearly separable iris training data (", 
+                 nrow(training_nonlin), " samples), petal length by width"))
+```
+
+We will try the radial basis function kernel instead, with a test $\gamma$ value of 1.
+
+```{r}
+svm_model <- svm(Species ~ ., data = training_nonlin, kernel = "radial", cost = 5, gamma = 1, scale = FALSE)
+plot(svm_model, training_nonlin, dataSymbol = 1, col = c("#8DD3C7","#FFFFB3"))
+```
+
+So the new non-linear decision boundary does better than a straight line would, but just barely. We perform cross-validation again. 
+
+```{r}
+set.seed(10)
+tune_svm = tune(method = svm, Species ~ .,
+                data = training_nonlin, kernel = "radial", 
+                ranges = list(cost = c(0.001, 0.01, 0.1, 1,5,10,100), 
+                              gamma = seq(0.5, 5, 0.5)))
+summary(tune_svm$best.model)
+```
+
+So the best radial basis kernel is with cost `r tune_svm$best.model$cost` and gamma `r tune_svm$best.model$gamma`, and it uses `r tune_svm$best.model$tot.nSV` support vectors. 
+
+We plot again with the training data (using this best model) and then run on the test data. 
+
+```{r}
+plot(tune_svm$best.model, training_nonlin, dataSymbol = 1, col = c("#8DD3C7","#FFFFB3"))
+```
+```{r}
+table(predicted = predict(tune_svm$best.model, newdata = test_nonlin), 
+      actual = test_nonlin$Species)
+```
+So all of the flowers were classified correctly. Note again that the X's indicate which points were used for support vectors for the decision boundary. We have to be careful of overfitting, and to do that we can reduce the cost penalty of violating constraints, for example.
+
+## Multi-class SVMs
+
+SVMs with multiple classes is in practice the same set of steps as with binary categorical data. 
+
+```{r}
+multi_class <- iris %>% select(Petal.Length, Petal.Width, Species)
+multi_class$Species <- factor(multi_class$Species, levels = unique(multi_class$Species))
+
+training_multi <- multi_class[sample_indices == 1,]
+test_multi <- multi_class[sample_indices == 2,]
+
+ggplot(training_multi, aes(x = Petal.Width, y = Petal.Length)) + 
+  geom_point(aes(color = Species)) + 
+  ggtitle(paste0("Multiple class iris training data (", 
+                 nrow(training_multi), " samples), petal length by width"))
+```
+```{r}
+svm_model <- svm(Species ~ ., data = training_multi, kernel = "radial", cost = 5, gamma = 1, scale = FALSE)
+plot(svm_model, training_multi, dataSymbol = 1, col = c("#8DD3C7","#FFFFB3", "#FB8072"))
+```
+
+```{r}
+table(predicted = predict(tune_svm$best.model, newdata = test_multi), 
+      actual = test_multi$Species)
+```
+And so we have pretty good accuracy on the test samples. 
+
+## Notable parameters and return values with (paraphrased) notes from the manual
+
+The specifications behind the fitted SVM model: 
+
+  * formula 
+    + a descriptor for what your classification model should look like
+    + in our case, we have *Species* as a function of the data frame
+
+  * data
+    + a data frame containing both the x (feature) input values and the y output values
+  
+  * x
+    + can supply this as an option instead of the data parameter
+    
+  * y
+    + can supply this as an option instead of the data parameter
+
+  * scale
+    + a vector of TRUE/FALSE values
+    + `r scale = FALSE` means to not scale any of the variables
+    + if you set `r scale = TRUE` for a variable, it is normalized to have zero mean and unit variance
+
+  * type
+    + this tells you what type of SVM you have
+    + the default is classification
+
+  * kernel
+    + this is the selling point for SVMs
+    + possible values include "linear", "polynomial", "radial" and "sigmoid"
+    + the following parameters require values depending on which kernel you select
+    + kernel = "polynomial"
+      - cost
+      - degree
+      - gamma
+      - coef0
+    + kernel = "radial"
+      - cost
+      - gamma
+    + kernel = "linear"
+      - cost
+    + kernel = "sigmoid"
+      - cost
+      - gamma
+      - coef0
+
+  * cost
+    + this is the penalty for violating constraints
+
+  * cross
+    + performs k-fold cross validation
+    + most recommend using the tune() function provided by the e1071 library instead, as it performs hyperparameter tuning while running the cross validation
+
+  * na.action
+    + default action is to omit NAs
+    + you can trigger an error (for the model fitting to stop) if there are NAS
+
+Notes: 
+
+  * multi-class classification
+    + the 'one-against-one' method is used
+    + so binary classifiers for each of the k classes are trained, and voting is used to find the final class result
+    
+
