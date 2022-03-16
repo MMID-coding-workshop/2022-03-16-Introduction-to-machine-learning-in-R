@@ -163,7 +163,7 @@ So the new non-linear decision boundary does better than a straight line would, 
 set.seed(10)
 tune_svm = tune(method = svm, Species ~ .,
                 data = training_nonlin, kernel = "radial", 
-                ranges = list(cost = c(0.001, 0.01, 0.1, 1,5,10,100), 
+                ranges = list(cost = c(0.001, 0.01, 0.1, 1, 10, 100), 
                               gamma = seq(0.5, 5, 0.5)))
 summary(tune_svm$best.model)
 ```
